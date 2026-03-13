@@ -1,2 +1,5 @@
 .claude/
-.env/
+__pycachae__/
+.env.local
+
+.env
