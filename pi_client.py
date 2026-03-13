@@ -42,6 +42,7 @@ ALL_INPUT_PINS  = (BTN_GREEN, BTN_RED, BTN1, BTN2, BTN3, BTN4)
 
 # ── GPIO 초기화 ──────────────────────────────────────────────────
 def setup_gpio():
+    GPIO.cleanup()
     GPIO.setmode(GPIO.BCM)
     GPIO.setwarnings(False)
     for pin in ALL_OUTPUT_PINS:
