@@ -63,6 +63,17 @@ def _run_game2():
         print("\n[대기] 웹 대시보드에서 게임을 선택하세요.")
 
 
+def _run_game3():
+    from game3_dodge import run_game3
+    try:
+        run_game3()
+    except Exception as e:
+        print(f"[Game3] 오류: {e}")
+    finally:
+        ss.broadcast("game_ready", {"message": "게임을 선택하세요"})
+        print("\n[대기] 웹 대시보드에서 게임을 선택하세요.")
+
+
 # ── WebSocket 명령 핸들러 ────────────────────────────────────────
 def on_command(cmd_type: str, data: dict):
     """웹 대시보드에서 수신한 명령 처리"""
@@ -82,6 +93,9 @@ def on_command(cmd_type: str, data: dict):
             elif game_id == "2":
                 target = _run_game2
                 name = "AI 퀴즈 게임"
+            elif game_id == "3":
+                target = _run_game3
+                name = "좌우 피하기 게임"
             else:
                 print(f"[명령] 알 수 없는 게임 ID: {game_id}")
                 return

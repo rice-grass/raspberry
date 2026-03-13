@@ -243,6 +243,23 @@
     .dot-placeholder { background:#1a1d2e; border-color:#333; color:#444; }
     .dot-input { border-width: 3px; }
 
+    /* Game 3: Dodge */
+    #dodge-card { margin-bottom: 12px; display: none; }
+    .lane {
+      flex: 1; height: 76px; border-radius: 10px;
+      border: 2px solid #2a2d3e; background: #13151f;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.5rem; transition: all 0.25s;
+    }
+    .lane.player { background: #0d2018; border-color: #4caf50; box-shadow: 0 0 14px #4caf5044; }
+    .lane.danger { background: #1a0808; border-color: #f44336; animation: dangerPulse 0.6s ease infinite alternate; }
+    .lane.player.danger { background: #2d0808; border-color: #f44336; box-shadow: 0 0 22px #f44336; }
+    @keyframes dangerPulse {
+      from { box-shadow: 0 0 6px #f4433644; }
+      to   { box-shadow: 0 0 20px #f44336aa; }
+    }
+    #dodge-timer { font-size: 1.2rem; font-weight: 700; transition: color 0.3s; }
+
     /* Game 2: Question */
     #question-card { margin-bottom: 12px; display: none; }
     #question-text {
@@ -343,18 +360,24 @@
 <!-- 게임 선택 패널 -->
 <div id="select-panel">
   <h2>게임 선택</h2>
-  <div class="game-btns">
+  <div class="game-btns" style="grid-template-columns:1fr 1fr 1fr;">
     <button class="game-btn" id="btn-game1" onclick="startGame('1')" disabled>
       <span class="btn-badge">진행 중</span>
       <span class="btn-icon">🎨</span>
-      <div class="btn-title">컬러 메모리 게임</div>
-      <div class="btn-desc">LED 패턴을 보고 버튼으로 재현하세요<br>초록 버튼=초록 / 빨간 버튼=빨간</div>
+      <div class="btn-title">컬러 메모리</div>
+      <div class="btn-desc">LED 패턴을 보고 재현<br>초록 버튼=초록 / 빨간=빨간</div>
     </button>
     <button class="game-btn" id="btn-game2" onclick="startGame('2')" disabled>
       <span class="btn-badge">진행 중</span>
       <span class="btn-icon">🧠</span>
       <div class="btn-title">AI 객관식 퀴즈</div>
-      <div class="btn-desc">GPT가 출제한 문제를 버튼 4개로 풀기<br>10문제 · 연속 3정답 시 난이도 상승</div>
+      <div class="btn-desc">GPT 출제 문제<br>버튼 4개 · 난이도 자동 상승</div>
+    </button>
+    <button class="game-btn" id="btn-game3" onclick="startGame('3')" disabled>
+      <span class="btn-badge">진행 중</span>
+      <span class="btn-icon">↔️</span>
+      <div class="btn-title">좌우 피하기</div>
+      <div class="btn-desc">위험 레인을 피하세요<br>초록=왼쪽 / 빨간=오른쪽</div>
     </button>
   </div>
 </div>
@@ -403,6 +426,19 @@
   <div id="input-area"></div>
 </div>
 
+<!-- Game 3: Dodge -->
+<div class="card" id="dodge-card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <div class="card-label" style="margin-bottom:0;">레인</div>
+    <span id="dodge-timer">—</span>
+  </div>
+  <div id="dodge-lanes" style="display:flex;gap:6px;"></div>
+  <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:0.75rem;color:#555;">
+    <span>← 초록 버튼</span>
+    <span>빨간 버튼 →</span>
+  </div>
+</div>
+
 <!-- Game 2: Question -->
 <div class="card" id="question-card">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
@@ -433,6 +469,10 @@ let gameRunning = false;
 let currentPattern = [];
 let playerInputs = [];
 let piConnected = false;
+let currentGame = null;      // '1' | '2' | '3'
+let dodgeDanger = 1;
+let dodgeLanes = 7;
+let dodgeTimerInterval = null;
 
 // ── 환경 패널 초기화 ──────────────────────────────────────────
 function initEnvPanel() {
@@ -512,16 +552,18 @@ function startGame(id) {
   if (gameRunning) return;
 
   ws.send(JSON.stringify({ type: 'start_game', data: { game: id } }));
-  addLog((id === '1' ? '🎨 컬러 메모리 게임' : '🧠 AI 퀴즈') + ' 시작 요청 전송', 'info');
+  const names = {'1':'🎨 컬러 메모리 게임', '2':'🧠 AI 퀴즈', '3':'↔️ 좌우 피하기'};
+  addLog((names[id] || '게임') + ' 시작 요청 전송', 'info');
 }
 
 function enableButtons(on) {
-  document.getElementById('btn-game1').disabled = !on;
-  document.getElementById('btn-game2').disabled = !on;
+  ['btn-game1','btn-game2','btn-game3'].forEach(b =>
+    document.getElementById(b).disabled = !on
+  );
 }
 
 function setActiveGame(id) {
-  ['btn-game1','btn-game2'].forEach(b => {
+  ['btn-game1','btn-game2','btn-game3'].forEach(b => {
     document.getElementById(b).classList.remove('active');
     document.getElementById(b).disabled = true;
   });
@@ -539,12 +581,15 @@ function handle(msg) {
       if (data.game_running) {
         gameRunning = true;
         enableButtons(false);
-        const isQuiz = data.game && data.game.includes('퀴즈');
-        setActiveGame(isQuiz ? '2' : '1');
+        const isQuiz  = data.game && data.game.includes('퀴즈');
+        const isDodge = data.game && data.game.includes('피하기');
+        currentGame = isQuiz ? '2' : isDodge ? '3' : '1';
+        setActiveGame(currentGame);
         document.getElementById('game-name').textContent = data.game || '진행 중';
-        document.getElementById('pattern-card').style.display  = isQuiz ? 'none' : 'block';
-        document.getElementById('question-card').style.display = isQuiz ? 'block' : 'none';
-        setPhase(isQuiz ? '🧠 게임 진행 중...' : '🎨 게임 진행 중...', '');
+        document.getElementById('pattern-card').style.display  = currentGame === '1' ? 'block' : 'none';
+        document.getElementById('question-card').style.display = currentGame === '2' ? 'block' : 'none';
+        document.getElementById('dodge-card').style.display    = currentGame === '3' ? 'block' : 'none';
+        setPhase(isDodge ? '↔️ 게임 진행 중...' : isQuiz ? '🧠 게임 진행 중...' : '🎨 게임 진행 중...', '');
       } else {
         gameRunning = false;
         enableButtons(ws && ws.readyState === WebSocket.OPEN);
@@ -553,16 +598,19 @@ function handle(msg) {
 
     case 'game_ready':
       gameRunning = false;
+      currentGame = null;
       enableButtons(ws && ws.readyState === WebSocket.OPEN);
-      ['btn-game1','btn-game2'].forEach(b => document.getElementById(b).classList.remove('active'));
+      ['btn-game1','btn-game2','btn-game3'].forEach(b => document.getElementById(b).classList.remove('active'));
       document.getElementById('game-name').textContent = '대기 중';
       document.getElementById('stage-value').textContent = '—';
       document.getElementById('diff-value').textContent = '—';
       document.getElementById('diff-badge').textContent = '';
       document.getElementById('pattern-card').style.display = 'none';
       document.getElementById('question-card').style.display = 'none';
+      document.getElementById('dodge-card').style.display = 'none';
       document.getElementById('quiz-progress-bar').style.width = '0%';
       document.getElementById('game-status-bar').classList.remove('visible');
+      if (dodgeTimerInterval) { clearInterval(dodgeTimerInterval); dodgeTimerInterval = null; }
       addLog('✋ ' + (data.message || '게임을 선택하세요'), 'info');
       break;
 
@@ -570,17 +618,19 @@ function handle(msg) {
       gameRunning = true;
       currentPattern = [];
       playerInputs = [];
-      const isQuiz = data.game && data.game.includes('퀴즈');
-      const gameId = isQuiz ? '2' : '1';
-      setActiveGame(gameId);
+      const isQuiz  = data.game && data.game.includes('퀴즈');
+      const isDodge = data.game && data.game.includes('피하기');
+      currentGame = isQuiz ? '2' : isDodge ? '3' : '1';
+      setActiveGame(currentGame);
       document.getElementById('game-name').textContent = data.game;
       document.getElementById('score-value').textContent = '0';
       document.getElementById('stage-value').textContent = '—';
       document.getElementById('gameover-banner').style.display = 'none';
-      document.getElementById('pattern-card').style.display = isQuiz ? 'none' : 'block';
-      document.getElementById('question-card').style.display = isQuiz ? 'block' : 'none';
+      document.getElementById('pattern-card').style.display  = currentGame === '1' ? 'block' : 'none';
+      document.getElementById('question-card').style.display = currentGame === '2' ? 'block' : 'none';
+      document.getElementById('dodge-card').style.display    = currentGame === '3' ? 'block' : 'none';
       document.getElementById('diff-value').textContent = isQuiz ? '쉬움' : '—';
-      setPhase(isQuiz ? 'AI 퀴즈 게임 시작!' : '컬러 메모리 게임 시작!', '');
+      setPhase(isDodge ? '↔️ 좌우 피하기 시작!' : isQuiz ? '🧠 AI 퀴즈 게임 시작!' : '🎨 컬러 메모리 게임 시작!', '');
       addLog('🎮 게임 시작: ' + data.game, 'info');
       break;
     }
@@ -636,8 +686,22 @@ function handle(msg) {
       setPhase(data.label, '');
       break;
 
+    case 'dodge_state':
+      dodgeDanger = data.danger;
+      dodgeLanes  = data.lanes || 7;
+      renderDodge(data.player, data.danger, data.lanes || 7);
+      startDodgeTimer(data.time_limit || 3.0);
+      setPhase('⚡ 위험 레인을 피하세요!', `제한: ${data.time_limit}초`);
+      addLog(`⚡ 위험 레인: ${data.danger}  |  현재 위치: ${data.player}`, 'warn');
+      break;
+
     case 'player_input':
-      if (data.color !== undefined) {
+      if (data.player !== undefined && currentGame === '3') {
+        if (dodgeTimerInterval) { clearInterval(dodgeTimerInterval); dodgeTimerInterval = null; }
+        renderDodge(data.player, dodgeDanger, dodgeLanes);
+        const dir = data.color === 'G' ? '← 왼쪽' : data.color === 'R' ? '→ 오른쪽' : '⏸ 제자리';
+        addLog(`👆 ${dir} 이동 → 레인 ${data.player}`, 'info');
+      } else if (data.color !== undefined) {
         playerInputs.push(data.color);
         renderPattern(currentPattern, playerInputs);
         addLog('👆 입력: ' + (data.label || data.color), 'info');
@@ -687,6 +751,7 @@ function handle(msg) {
 
     case 'game_over':
       gameRunning = false;
+      if (dodgeTimerInterval) { clearInterval(dodgeTimerInterval); dodgeTimerInterval = null; }
       enableButtons(ws && ws.readyState === WebSocket.OPEN);
       setActiveGame(null);
       document.getElementById('quiz-progress-bar').style.width = '100%';
@@ -736,6 +801,47 @@ function showScoreInc(text) {
   void el.offsetWidth;
   el.style.animation = 'scoreInc 0.9s ease forwards';
   setTimeout(() => { el.style.display = 'none'; }, 900);
+}
+
+// ── Game 3 Dodge 렌더링 ───────────────────────────────────────
+function renderDodge(player, danger, lanes) {
+  const container = document.getElementById('dodge-lanes');
+  container.innerHTML = '';
+  for (let i = 1; i <= lanes; i++) {
+    const lane = document.createElement('div');
+    lane.className = 'lane';
+    if (i === player && i === danger) {
+      lane.classList.add('player', 'danger');
+      lane.textContent = '💥';
+    } else if (i === player) {
+      lane.classList.add('player');
+      lane.textContent = '🧑';
+    } else if (i === danger) {
+      lane.classList.add('danger');
+      lane.textContent = '⚡';
+    }
+    container.appendChild(lane);
+  }
+}
+
+function startDodgeTimer(seconds) {
+  if (dodgeTimerInterval) clearInterval(dodgeTimerInterval);
+  let remaining = seconds;
+  const el = document.getElementById('dodge-timer');
+  el.style.color = '#fff';
+  el.textContent = remaining.toFixed(1) + 's';
+  dodgeTimerInterval = setInterval(() => {
+    remaining -= 0.1;
+    if (remaining <= 0) {
+      clearInterval(dodgeTimerInterval);
+      dodgeTimerInterval = null;
+      el.textContent = '0.0s';
+      el.style.color = '#f44336';
+      return;
+    }
+    el.textContent = remaining.toFixed(1) + 's';
+    el.style.color = remaining < 1.0 ? '#f44336' : remaining < 2.0 ? '#ff9800' : '#fff';
+  }, 100);
 }
 
 // ── Game 1 패턴 렌더링 ────────────────────────────────────────

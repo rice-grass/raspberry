@@ -100,6 +100,22 @@ def read_game1_button():
         return None
 
 
+def read_game1_button_timed(timeout_sec: float):
+    """
+    Game3용: 지정 시간 내 버튼 입력 수신.
+    반환: 'G' 또는 'R', 타임아웃 시 None
+    """
+    ss.clear_button_queue()
+    ss.send_to_pi("await_button", {"type": "game1", "timeout": timeout_sec})
+    try:
+        event = ss.get_button_event(timeout=timeout_sec + 2)
+        if event.get("timeout"):
+            return None
+        return event.get("color")
+    except queue.Empty:
+        return None
+
+
 def wait_for_any_button(pins):
     """
     Pi 버튼 중 가장 먼저 눌린 버튼 인덱스 수신 (Game2용, 9초 카운트다운 포함).

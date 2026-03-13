@@ -174,6 +174,14 @@ def clear_button_queue():
             break
 
 
+def get_button_nowait():
+    """논블로킹 버튼 이벤트 확인. 없으면 None 반환."""
+    try:
+        return _button_queue.get_nowait()
+    except _queue_module.Empty:
+        return None
+
+
 # ── 서버 시작 ────────────────────────────────────────────────────
 async def _run_app(host: str, port: int):
     global _loop

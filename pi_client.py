@@ -14,6 +14,7 @@ import asyncio
 import json
 import subprocess
 import sys
+import threading
 import time
 
 import RPi.GPIO as GPIO
@@ -108,6 +109,32 @@ def _wait_for_any_button(pins):
         time.sleep(0.01)
 
 
+def _wait_game1_timed(timeout_sec):
+    """Game3용: 지정 시간 내 버튼 대기. 반환: 'G'/'R', 타임아웃 시 None"""
+    result = [None]
+    done = threading.Event()
+
+    def btn():
+        while not done.is_set():
+            for pin, color in ((BTN_GREEN, 'G'), (BTN_RED, 'R')):
+                if GPIO.input(pin) == GPIO.LOW:
+                    time.sleep(0.05)
+                    if GPIO.input(pin) == GPIO.LOW:
+                        while GPIO.input(pin) == GPIO.LOW:
+                            time.sleep(0.01)
+                        time.sleep(0.05)
+                        result[0] = color
+                        done.set()
+                        return
+            time.sleep(0.01)
+
+    t = threading.Thread(target=btn, daemon=True)
+    t.start()
+    done.wait(timeout=timeout_sec)
+    done.set()
+    return result[0]
+
+
 # ── 부저 ─────────────────────────────────────────────────────────
 def _buzzer_tone(frequency_hz, duration_sec):
     try:
@@ -190,11 +217,19 @@ async def handle_command(ws, cmd, data, loop):
 
         elif cmd == "await_button":
             btn_type = data.get("type")
+            timeout  = data.get("timeout")
 
             if btn_type == "game1":
-                color = await loop.run_in_executor(None, _wait_game1_button)
-                await ws.send(json.dumps({"type": "button_press", "data": {"color": color}}))
-                print(f"[Pi] 버튼 입력 ({'초록' if color == 'G' else '빨간'})")
+                if timeout:
+                    color = await loop.run_in_executor(None, _wait_game1_timed, timeout)
+                else:
+                    color = await loop.run_in_executor(None, _wait_game1_button)
+                if color is None:
+                    await ws.send(json.dumps({"type": "button_press", "data": {"timeout": True}}))
+                    print("[Pi] 시간 초과 (game1)")
+                else:
+                    await ws.send(json.dumps({"type": "button_press", "data": {"color": color}}))
+                    print(f"[Pi] 버튼 입력 ({'초록' if color == 'G' else '빨간'})")
 
             elif btn_type == "any":
                 idx = await loop.run_in_executor(None, _wait_for_any_button, ANSWER_PINS)
