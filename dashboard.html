@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>라즈베리파이 게임 대시보드</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', 'Apple SD Gothic Neo', sans-serif;
+      background: #0f1117;
+      color: #e0e0e0;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid #2a2d3e;
+    }
+    header h1 { font-size: 1.3rem; color: #fff; }
+    #conn-status { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; }
+    #conn-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #555; transition: background 0.3s;
+    }
+    #conn-dot.connected    { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
+    #conn-dot.disconnected { background: #f44336; }
+    #conn-dot.connecting   { background: #ff9800; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.4} }
+
+    /* ── 환경 설정 패널 ── */
+    #env-panel {
+      background: #13151f;
+      border: 1px solid #2a2d3e;
+      border-radius: 12px;
+      padding: 14px 18px;
+      margin-bottom: 18px;
+      font-size: 0.82rem;
+    }
+    #env-header {
+      display: flex; align-items: center; justify-content: space-between;
+      cursor: pointer; user-select: none;
+    }
+    #env-header span { color: #aaa; font-size: 0.78rem; letter-spacing: 0.05em; }
+    #env-toggle { color: #555; font-size: 0.72rem; transition: transform 0.2s; }
+    #env-toggle.open { transform: rotate(180deg); }
+    #env-body {
+      display: none; margin-top: 14px;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+    }
+    #env-body.collapsed { display: none; }
+    .env-row {
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .env-label { color: #666; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; }
+    .env-value { color: #ccc; font-size: 0.82rem; word-break: break-all; }
+    .env-input-row {
+      grid-column: 1 / -1;
+      display: flex; gap: 8px; align-items: center; margin-top: 4px;
+    }
+    #server-input {
+      flex: 1; background: #1a1d2e; border: 1px solid #3a3d4e; border-radius: 6px;
+      color: #e0e0e0; padding: 6px 10px; font-size: 0.82rem; outline: none;
+    }
+    #server-input:focus { border-color: #4a5080; }
+    #reconnect-btn {
+      background: #2a2d3e; border: 1px solid #3a3d4e; border-radius: 6px;
+      color: #ccc; padding: 6px 14px; font-size: 0.78rem; cursor: pointer;
+      white-space: nowrap; transition: background 0.2s;
+    }
+    #reconnect-btn:hover { background: #3a3d5e; color: #fff; }
+    .pi-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 10px; font-size: 0.75rem; font-weight: 600;
+    }
+    .pi-badge.on  { background: #0d2018; color: #4caf50; border: 1px solid #4caf5055; }
+    .pi-badge.off { background: #1a1010; color: #f44336; border: 1px solid #f4433655; }
+    .pi-badge .dot { width: 7px; height: 7px; border-radius: 50%; }
+    .pi-badge.on  .dot { background: #4caf50; box-shadow: 0 0 4px #4caf50; }
+    .pi-badge.off .dot { background: #f44336; }
+
+    /* ── 게임 선택 패널 ── */
+    #select-panel {
+      margin-bottom: 20px;
+    }
+    #select-panel h2 {
+      font-size: 0.75rem;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 12px;
+    }
+    .game-btns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .game-btn {
+      position: relative;
+      background: #1a1d2e;
+      border: 2px solid #2a2d3e;
+      border-radius: 14px;
+      padding: 22px 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: left;
+      color: #e0e0e0;
+    }
+    .game-btn:hover:not(:disabled) {
+      border-color: #4a5080;
+      background: #20243a;
+      transform: translateY(-2px);
+    }
+    .game-btn:active:not(:disabled) { transform: translateY(0); }
+    .game-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .game-btn.active {
+      border-color: #4caf50;
+      background: #0d2018;
+      box-shadow: 0 0 18px #4caf5033;
+    }
+    .game-btn .btn-icon { font-size: 2rem; margin-bottom: 8px; display: block; }
+    .game-btn .btn-title { font-size: 1rem; font-weight: 700; color: #fff; }
+    .game-btn .btn-desc  { font-size: 0.78rem; color: #888; margin-top: 4px; }
+    .game-btn .btn-badge {
+      position: absolute;
+      top: 12px; right: 12px;
+      background: #4caf50;
+      color: #fff;
+      font-size: 0.65rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 10px;
+      display: none;
+    }
+    .game-btn.active .btn-badge { display: block; }
+
+    /* Stats Grid */
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+
+    .card {
+      background: #1a1d2e;
+      border: 1px solid #2a2d3e;
+      border-radius: 12px;
+      padding: 18px;
+      transition: border-color 0.3s, box-shadow 0.3s;
+    }
+    .card-label {
+      font-size: 0.72rem; color: #888;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      margin-bottom: 6px;
+    }
+    .card-value { font-size: 2.2rem; font-weight: 700; color: #fff; }
+    .card-value.sm { font-size: 1.1rem; line-height: 1.4; }
+
+    @keyframes scoreUp {
+      0%  { transform: scale(1);   color: #fff; }
+      50% { transform: scale(1.3); color: #4caf50; }
+      100%{ transform: scale(1);   color: #fff; }
+    }
+    @keyframes scoreInc {
+      0%   { opacity:1; transform: translateY(0) scale(1); }
+      100% { opacity:0; transform: translateY(-30px) scale(1.4); }
+    }
+    @keyframes ledPulse {
+      0%,100% { box-shadow: 0 0 8px currentColor; }
+      50%     { box-shadow: 0 0 22px currentColor, 0 0 40px currentColor; }
+    }
+    @keyframes phaseIn {
+      from { opacity:0; transform:translateY(-6px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    .score-flash { animation: scoreUp 0.5s ease; }
+    .flash-green { border-color: #4caf50 !important; box-shadow: 0 0 24px #4caf5055 !important; }
+    .flash-red   { border-color: #f44336 !important; box-shadow: 0 0 24px #f4433655 !important; }
+
+    /* ── 게임 상태 바 ── */
+    #game-status-bar {
+      display: none;
+      align-items: center; justify-content: space-between;
+      background: #13151f; border: 1px solid #2a2d3e;
+      border-radius: 10px; padding: 10px 16px;
+      margin-bottom: 12px; font-size: 0.85rem;
+      animation: phaseIn 0.3s ease;
+    }
+    #game-status-bar.visible { display: flex; }
+    #phase-label { color: #e0e0e0; font-weight: 600; }
+    #score-inc {
+      position: fixed; pointer-events: none; font-size: 1.4rem; font-weight: 900;
+      color: #4caf50; z-index: 999; display: none;
+      animation: scoreInc 0.9s ease forwards;
+    }
+    #quiz-progress-wrap {
+      width: 100%; background: #1a1d2e; border-radius: 4px;
+      height: 5px; overflow: hidden; margin-top: 8px;
+    }
+    #quiz-progress-bar {
+      height: 100%; background: linear-gradient(90deg, #2196f3, #4caf50);
+      border-radius: 4px; transition: width 0.4s ease;
+      width: 0%;
+    }
+
+    /* Game 1: Pattern */
+    #pattern-card { margin-bottom: 12px; display: none; }
+    #pattern-area, #input-area {
+      display: flex; flex-wrap: wrap;
+      gap: 10px; min-height: 48px; align-items: center;
+    }
+    #input-area { margin-top: 10px; }
+    .dot {
+      width: 46px; height: 46px; border-radius: 50%;
+      border: 2px solid transparent;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.68rem; font-weight: 700; transition: all 0.15s;
+    }
+    .dot-G { background:#1b4332; border-color:#4caf50; color:#4caf50; }
+    .dot-R { background:#3b0f0f; border-color:#f44336; color:#f44336; }
+    .dot-G.lit {
+      background:#4caf50; color:#fff;
+      animation: ledPulse 0.5s ease;
+    }
+    .dot-R.lit {
+      background:#f44336; color:#fff;
+      animation: ledPulse 0.5s ease;
+    }
+    .dot-G.active { background:#4caf50; color:#fff; box-shadow:0 0 18px #4caf50; transform:scale(1.2); }
+    .dot-R.active { background:#f44336; color:#fff; box-shadow:0 0 18px #f44336; transform:scale(1.2); }
+    .dot-placeholder { background:#1a1d2e; border-color:#333; color:#444; }
+    .dot-input { border-width: 3px; }
+
+    /* Game 2: Question */
+    #question-card { margin-bottom: 12px; display: none; }
+    #question-text {
+      font-size: 1rem; color: #fff; line-height: 1.6;
+      margin-bottom: 14px; font-weight: 500;
+    }
+    .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .opt {
+      background:#12141f; border:1px solid #2a2d3e; border-radius:10px;
+      padding:12px 14px; color:#bbb; font-size:0.85rem;
+      transition: all 0.3s; cursor: default;
+    }
+    .opt .opt-num {
+      display: inline-block; width:22px; height:22px; line-height:22px;
+      text-align:center; border-radius:50%; background:#2a2d3e;
+      font-size:0.75rem; font-weight:700; margin-right:6px; color:#888;
+    }
+    .opt.selected { border-color:#2196f3; background:#0d2137; color:#fff; }
+    .opt.selected .opt-num { background:#2196f3; color:#fff; }
+    .opt.correct  { border-color:#4caf50; background:#1b4332; color:#fff; }
+    .opt.correct  .opt-num { background:#4caf50; color:#fff; }
+    .opt.wrong    { border-color:#f44336; background:#3b0f0f; color:#fff; }
+    .opt.wrong    .opt-num { background:#f44336; color:#fff; }
+
+    /* Game Over */
+    #gameover-banner {
+      display: none; text-align: center;
+      padding: 32px; background: #1a1d2e;
+      border: 1px solid #4caf50; border-radius: 12px;
+      margin-bottom: 12px;
+    }
+    #gameover-banner h2 { font-size: 1.4rem; color: #4caf50; margin-bottom: 6px; }
+    #gameover-banner .fs { font-size: 3rem; font-weight: 700; color: #fff; }
+    #gameover-banner .fd { color: #888; font-size: 0.88rem; margin-top: 6px; }
+
+    /* Log */
+    .log-wrap { background:#1a1d2e; border:1px solid #2a2d3e; border-radius:12px; padding:16px; }
+    .log-wrap .card-label { margin-bottom: 8px; }
+    #log-area {
+      height: 220px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    #log-area::-webkit-scrollbar { width: 4px; }
+    #log-area::-webkit-scrollbar-thumb { background:#3a3d4e; border-radius:2px; }
+    .log-entry {
+      font-size: 0.78rem; padding: 5px 10px;
+      border-radius: 6px; background: #12141f;
+      border-left: 3px solid #3a3d4e; line-height: 1.4;
+    }
+    .log-entry.correct { border-left-color:#4caf50; }
+    .log-entry.wrong   { border-left-color:#f44336; }
+    .log-entry.info    { border-left-color:#2196f3; }
+    .log-entry.warn    { border-left-color:#ff9800; }
+    .log-time { color:#555; margin-right:6px; }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <h1>🍓 라즈베리파이 게임 센터</h1>
+  <div id="conn-status">
+    <div id="conn-dot" class="connecting"></div>
+    <span id="conn-text">연결 중...</span>
+  </div>
+</header>
+
+<!-- 환경 설정 패널 -->
+<div id="env-panel">
+  <div id="env-header" onclick="toggleEnv()">
+    <span>⚙️ 환경 설정</span>
+    <span id="env-toggle">▲</span>
+  </div>
+  <div id="env-body">
+    <div class="env-row">
+      <span class="env-label">서버 주소</span>
+      <span class="env-value" id="env-server-url">—</span>
+    </div>
+    <div class="env-row">
+      <span class="env-label">Pi GPIO 상태</span>
+      <span id="pi-hw-badge" class="pi-badge off"><span class="dot"></span>미연결</span>
+    </div>
+    <div class="env-row">
+      <span class="env-label">WebSocket</span>
+      <span class="env-value" id="env-ws-url">—</span>
+    </div>
+    <div class="env-row">
+      <span class="env-label">서버 연결</span>
+      <span class="env-value" id="env-ws-status">—</span>
+    </div>
+    <div class="env-input-row">
+      <input id="server-input" type="text" placeholder="서버 IP (예: 119.200.3.240)" />
+      <button id="reconnect-btn" onclick="reconnectServer()">재연결</button>
+    </div>
+  </div>
+</div>
+
+<!-- 게임 선택 패널 -->
+<div id="select-panel">
+  <h2>게임 선택</h2>
+  <div class="game-btns">
+    <button class="game-btn" id="btn-game1" onclick="startGame('1')" disabled>
+      <span class="btn-badge">진행 중</span>
+      <span class="btn-icon">🎨</span>
+      <div class="btn-title">컬러 메모리 게임</div>
+      <div class="btn-desc">LED 패턴을 보고 버튼으로 재현하세요<br>초록 버튼=초록 / 빨간 버튼=빨간</div>
+    </button>
+    <button class="game-btn" id="btn-game2" onclick="startGame('2')" disabled>
+      <span class="btn-badge">진행 중</span>
+      <span class="btn-icon">🧠</span>
+      <div class="btn-title">AI 객관식 퀴즈</div>
+      <div class="btn-desc">GPT가 출제한 문제를 버튼 4개로 풀기<br>10문제 · 연속 3정답 시 난이도 상승</div>
+    </button>
+  </div>
+</div>
+
+<!-- 점수 증가 팝업 (floating) -->
+<div id="score-inc"></div>
+
+<!-- 게임 상태 바 -->
+<div id="game-status-bar">
+  <span id="phase-label">대기 중</span>
+  <span id="phase-detail" style="color:#666;font-size:0.78rem;"></span>
+</div>
+
+<!-- Game Over Banner -->
+<div id="gameover-banner">
+  <h2>🏁 게임 종료!</h2>
+  <div class="fs" id="final-score">0점</div>
+  <div class="fd" id="final-detail"></div>
+</div>
+
+<!-- Stats -->
+<div class="grid">
+  <div class="card" id="card-game">
+    <div class="card-label">현재 게임</div>
+    <div class="card-value sm" id="game-name">대기 중</div>
+  </div>
+  <div class="card" id="card-score">
+    <div class="card-label">점수</div>
+    <div class="card-value" id="score-value">0</div>
+  </div>
+  <div class="card" id="card-stage">
+    <div class="card-label">스테이지 / 문제</div>
+    <div class="card-value sm" id="stage-value">—</div>
+  </div>
+  <div class="card" id="card-diff">
+    <div class="card-label">난이도</div>
+    <div class="card-value sm" id="diff-value">—</div>
+  </div>
+</div>
+
+<!-- Game 1: Pattern -->
+<div class="card" id="pattern-card">
+  <div class="card-label">LED 패턴</div>
+  <div id="pattern-area"></div>
+  <div class="card-label" style="margin-top:10px;">내 입력</div>
+  <div id="input-area"></div>
+</div>
+
+<!-- Game 2: Question -->
+<div class="card" id="question-card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+    <div class="card-label" style="margin-bottom:0;">현재 문제</div>
+    <span id="diff-badge" style="font-size:0.7rem;padding:2px 8px;border-radius:8px;background:#1a1d2e;border:1px solid #2a2d3e;color:#888;"></span>
+  </div>
+  <div id="quiz-progress-wrap"><div id="quiz-progress-bar"></div></div>
+  <div id="question-text" style="margin-top:12px;">—</div>
+  <div class="opts" id="opts-grid"></div>
+</div>
+
+<!-- Event Log -->
+<div class="log-wrap">
+  <div class="card-label">이벤트 로그</div>
+  <div id="log-area"></div>
+</div>
+
+<script>
+// ── 설정 ─────────────────────────────────────────────────────
+const params = new URLSearchParams(location.search);
+let serverIp   = params.get('ip') || window.location.hostname || '192.168.110.150';
+let serverPort = window.location.port || '8080';
+
+function buildWsUrl(ip, port) { return `ws://${ip}:${port}/ws`; }
+
+let ws = null;
+let gameRunning = false;
+let currentPattern = [];
+let playerInputs = [];
+let piConnected = false;
+
+// ── 환경 패널 초기화 ──────────────────────────────────────────
+function initEnvPanel() {
+  document.getElementById('server-input').value = serverIp;
+  document.getElementById('env-server-url').textContent = `${serverIp}:${serverPort}`;
+  document.getElementById('env-ws-url').textContent = buildWsUrl(serverIp, serverPort);
+}
+
+function toggleEnv() {
+  const body = document.getElementById('env-body');
+  const icon = document.getElementById('env-toggle');
+  const collapsed = body.classList.toggle('collapsed');
+  icon.textContent = collapsed ? '▼' : '▲';
+  icon.classList.toggle('open', !collapsed);
+}
+
+function updateEnvStatus(connected) {
+  document.getElementById('env-ws-status').textContent = connected ? '연결됨 ✓' : '연결 끊김';
+  document.getElementById('env-ws-status').style.color = connected ? '#4caf50' : '#f44336';
+}
+
+function updatePiBadge(connected) {
+  piConnected = connected;
+  const el = document.getElementById('pi-hw-badge');
+  el.className = `pi-badge ${connected ? 'on' : 'off'}`;
+  el.innerHTML = `<span class="dot"></span>${connected ? 'GPIO 연결됨' : '미연결'}`;
+}
+
+function reconnectServer() {
+  const input = document.getElementById('server-input').value.trim();
+  if (!input) return;
+  serverIp = input;
+  document.getElementById('env-server-url').textContent = `${serverIp}:${serverPort}`;
+  document.getElementById('env-ws-url').textContent = buildWsUrl(serverIp, serverPort);
+  if (ws) ws.close();   // onclose 핸들러에서 새 URL로 재연결
+}
+
+// ── WebSocket 연결 ────────────────────────────────────────────
+function connect() {
+  const url = buildWsUrl(serverIp, serverPort);
+  setStatus('connecting');
+  updateEnvStatus(false);
+  ws = new WebSocket(url);
+  ws.onopen = () => {
+    setStatus('connected');
+    updateEnvStatus(true);
+    addLog(`서버 연결됨 (${url})`, 'info');
+  };
+  ws.onclose = () => {
+    setStatus('disconnected');
+    updateEnvStatus(false);
+    updatePiBadge(false);
+    addLog('연결 끊김. 3초 후 재연결...', 'warn');
+    setTimeout(connect, 3000);
+  };
+  ws.onerror = () => ws.close();
+  ws.onmessage = e => {
+    try { handle(JSON.parse(e.data)); } catch(_) {}
+  };
+}
+
+function setStatus(s) {
+  document.getElementById('conn-dot').className = s;
+  document.getElementById('conn-text').textContent =
+    s === 'connected' ? '연결됨' : s === 'connecting' ? '연결 중...' : '연결 끊김';
+  // 연결됐을 때만 버튼 활성화 (게임 미진행 중)
+  if (s === 'connected' && !gameRunning) enableButtons(true);
+  if (s !== 'connected') enableButtons(false);
+}
+
+// ── 게임 시작 명령 전송 ───────────────────────────────────────
+function startGame(id) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    addLog('Pi에 연결되지 않았습니다.', 'warn');
+    return;
+  }
+  if (gameRunning) return;
+
+  ws.send(JSON.stringify({ type: 'start_game', data: { game: id } }));
+  addLog((id === '1' ? '🎨 컬러 메모리 게임' : '🧠 AI 퀴즈') + ' 시작 요청 전송', 'info');
+}
+
+function enableButtons(on) {
+  document.getElementById('btn-game1').disabled = !on;
+  document.getElementById('btn-game2').disabled = !on;
+}
+
+function setActiveGame(id) {
+  ['btn-game1','btn-game2'].forEach(b => {
+    document.getElementById(b).classList.remove('active');
+    document.getElementById(b).disabled = true;
+  });
+  if (id) document.getElementById('btn-game' + id).classList.add('active');
+}
+
+// ── 메시지 핸들러 ─────────────────────────────────────────────
+function handle(msg) {
+  const { type, data } = msg;
+  switch (type) {
+
+    case 'state_sync':
+      updatePiBadge(data.pi_connected || false);
+      document.getElementById('score-value').textContent = data.score || 0;
+      if (data.game_running) {
+        gameRunning = true;
+        enableButtons(false);
+        const isQuiz = data.game && data.game.includes('퀴즈');
+        setActiveGame(isQuiz ? '2' : '1');
+        document.getElementById('game-name').textContent = data.game || '진행 중';
+        document.getElementById('pattern-card').style.display  = isQuiz ? 'none' : 'block';
+        document.getElementById('question-card').style.display = isQuiz ? 'block' : 'none';
+        setPhase(isQuiz ? '🧠 게임 진행 중...' : '🎨 게임 진행 중...', '');
+      } else {
+        gameRunning = false;
+        enableButtons(ws && ws.readyState === WebSocket.OPEN);
+      }
+      break;
+
+    case 'game_ready':
+      gameRunning = false;
+      enableButtons(ws && ws.readyState === WebSocket.OPEN);
+      ['btn-game1','btn-game2'].forEach(b => document.getElementById(b).classList.remove('active'));
+      document.getElementById('game-name').textContent = '대기 중';
+      document.getElementById('stage-value').textContent = '—';
+      document.getElementById('diff-value').textContent = '—';
+      document.getElementById('diff-badge').textContent = '';
+      document.getElementById('pattern-card').style.display = 'none';
+      document.getElementById('question-card').style.display = 'none';
+      document.getElementById('quiz-progress-bar').style.width = '0%';
+      document.getElementById('game-status-bar').classList.remove('visible');
+      addLog('✋ ' + (data.message || '게임을 선택하세요'), 'info');
+      break;
+
+    case 'game_start': {
+      gameRunning = true;
+      currentPattern = [];
+      playerInputs = [];
+      const isQuiz = data.game && data.game.includes('퀴즈');
+      const gameId = isQuiz ? '2' : '1';
+      setActiveGame(gameId);
+      document.getElementById('game-name').textContent = data.game;
+      document.getElementById('score-value').textContent = '0';
+      document.getElementById('stage-value').textContent = '—';
+      document.getElementById('gameover-banner').style.display = 'none';
+      document.getElementById('pattern-card').style.display = isQuiz ? 'none' : 'block';
+      document.getElementById('question-card').style.display = isQuiz ? 'block' : 'none';
+      document.getElementById('diff-value').textContent = isQuiz ? '쉬움' : '—';
+      setPhase(isQuiz ? '🧠 AI 퀴즈 게임 시작!' : '🎨 컬러 메모리 게임 시작!', '');
+      addLog('🎮 게임 시작: ' + data.game, 'info');
+      break;
+    }
+
+    case 'stage_update':
+      if (data.stage !== undefined)
+        document.getElementById('stage-value').textContent = 'Stage ' + data.stage;
+      else if (data.question_num !== undefined) {
+        document.getElementById('stage-value').textContent = data.question_num + ' / 10';
+        document.getElementById('quiz-progress-bar').style.width = ((data.question_num - 1) / 10 * 100) + '%';
+      }
+      if (data.difficulty_label) {
+        document.getElementById('diff-value').textContent = data.difficulty_label;
+        const badge = document.getElementById('diff-badge');
+        const colors = {쉬움:'#2196f3', 보통:'#ff9800', 어려움:'#f44336'};
+        badge.textContent = data.difficulty_label;
+        badge.style.color = colors[data.difficulty_label] || '#888';
+        badge.style.borderColor = colors[data.difficulty_label] || '#2a2d3e';
+      }
+      break;
+
+    case 'score_update': {
+      const prev = parseInt(document.getElementById('score-value').textContent) || 0;
+      const el = document.getElementById('score-value');
+      el.textContent = data.score;
+      el.classList.remove('score-flash');
+      void el.offsetWidth;
+      el.classList.add('score-flash');
+      const diff = data.score - prev;
+      if (diff > 0) showScoreInc('+' + diff);
+      break;
+    }
+
+    case 'hint':
+      document.getElementById('stage-value').textContent = 'Stage ' + data.stage;
+      setPhase('💬 ' + data.message, 'Stage ' + data.stage);
+      addLog('💬 ' + data.message, 'info');
+      break;
+
+    case 'pattern_show':
+      currentPattern = data.pattern || [];
+      playerInputs = [];
+      renderPattern(currentPattern, []);
+      addLog('📺 패턴 표시: ' + (data.labels || data.pattern).join(' → '), 'info');
+      break;
+
+    case 'led_step':
+      // LED 순서 애니메이션: 현재 점등 중인 dot 강조
+      animateLedStep(data.index, data.on);
+      break;
+
+    case 'game_phase':
+      setPhase(data.label, '');
+      break;
+
+    case 'player_input':
+      if (data.color !== undefined) {
+        playerInputs.push(data.color);
+        renderPattern(currentPattern, playerInputs);
+        addLog('👆 입력: ' + (data.label || data.color), 'info');
+      } else if (data.answer !== undefined) {
+        highlightOpt(data.answer - 1, 'selected');
+        addLog('👆 선택: ' + data.answer + '번', 'info');
+      }
+      break;
+
+    case 'question':
+      showQuestion(data);
+      setPhase('🧠 문제 ' + data.question_num + '/10', data.difficulty === 'easy' ? '쉬움' : data.difficulty === 'medium' ? '보통' : '어려움');
+      break;
+
+    case 'correct':
+      flashCard('card-score', 'flash-green');
+      if (data.explanation) {
+        highlightOpt((data.answer || 1) - 1, 'correct');
+        setPhase('✅ 정답!', data.explanation.length > 40 ? data.explanation.slice(0,40)+'…' : data.explanation);
+        addLog('✅ 정답! ' + data.explanation, 'correct');
+      } else {
+        setPhase('✅ 정답! Stage ' + (data.stage || '') + ' 클리어', '');
+        addLog('✅ 정답! Stage ' + (data.stage || ''), 'correct');
+      }
+      break;
+
+    case 'wrong':
+      flashCard('card-score', 'flash-red');
+      if (data.correct_answer !== undefined) {
+        highlightOpt((data.correct_answer) - 1, 'correct');
+        if (data.given) highlightOpt(data.given - 1, 'wrong');
+        setPhase('❌ 오답', '정답: ' + data.correct_answer + '번');
+        addLog('❌ 오답! 정답: ' + data.correct_answer + '번', 'wrong');
+      } else {
+        const exp = (data.expected_labels || data.expected || []).join('→');
+        const got = (data.got_labels || data.got || []).join('→');
+        setPhase('❌ 오답', '정답: ' + exp);
+        addLog('❌ 오답! 정답: ' + exp + ' | 내 입력: ' + got, 'wrong');
+      }
+      break;
+
+    case 'difficulty_up':
+      document.getElementById('diff-value').textContent = data.to_label || data.to;
+      setPhase('⬆️ 난이도 상승!', data.from_label + ' → ' + data.to_label);
+      addLog('⬆️ 난이도 상승: ' + data.from_label + ' → ' + data.to_label, 'warn');
+      break;
+
+    case 'game_over':
+      gameRunning = false;
+      enableButtons(ws && ws.readyState === WebSocket.OPEN);
+      setActiveGame(null);
+      document.getElementById('quiz-progress-bar').style.width = '100%';
+      document.getElementById('final-score').textContent = data.score + '점';
+      document.getElementById('final-detail').textContent =
+        data.stages_completed !== undefined
+          ? `스테이지 ${data.stages_completed}까지 클리어`
+          : `${data.total_questions || 10}문제 완료 | 만점: ${data.max_score || 100}점`;
+      document.getElementById('gameover-banner').style.display = 'block';
+      document.getElementById('game-status-bar').classList.remove('visible');
+      addLog('🏁 게임 종료! 최종 점수: ' + data.score + '점', 'info');
+      break;
+
+    case 'pi_status':
+      updatePiBadge(data.connected);
+      if (data.connected) {
+        addLog('🍓 라즈베리파이 GPIO 클라이언트 연결됨', 'correct');
+      } else {
+        addLog('⚠️ Pi GPIO 미연결 — Pi에서 pi_client.py를 실행하세요.', 'warn');
+      }
+      break;
+
+    case 'error':
+      addLog('⚠️ ' + data.message, 'warn');
+      break;
+  }
+}
+
+// ── 게임 상태 바 ──────────────────────────────────────────────
+function setPhase(label, detail) {
+  const bar = document.getElementById('game-status-bar');
+  bar.classList.add('visible');
+  document.getElementById('phase-label').textContent = label;
+  document.getElementById('phase-detail').textContent = detail || '';
+}
+
+// ── 점수 증가 팝업 ─────────────────────────────────────────────
+function showScoreInc(text) {
+  const el = document.getElementById('score-inc');
+  const scoreEl = document.getElementById('score-value');
+  const rect = scoreEl.getBoundingClientRect();
+  el.style.left = (rect.left + rect.width / 2 - 20) + 'px';
+  el.style.top  = (rect.top + window.scrollY - 10) + 'px';
+  el.textContent = text;
+  el.style.display = 'block';
+  el.style.animation = 'none';
+  void el.offsetWidth;
+  el.style.animation = 'scoreInc 0.9s ease forwards';
+  setTimeout(() => { el.style.display = 'none'; }, 900);
+}
+
+// ── Game 1 패턴 렌더링 ────────────────────────────────────────
+function renderPattern(pattern, inputs) {
+  const pArea = document.getElementById('pattern-area');
+  const iArea = document.getElementById('input-area');
+  pArea.innerHTML = '';
+  iArea.innerHTML = '';
+
+  pattern.forEach((c, i) => {
+    const d = document.createElement('div');
+    d.className = `dot dot-${c} lit`;
+    d.id = `pdot-${i}`;
+    d.textContent = c === 'G' ? '●' : '●';
+    d.style.color = c === 'G' ? '#4caf50' : '#f44336';
+    pArea.appendChild(d);
+  });
+
+  inputs.forEach((c, i) => {
+    const d = document.createElement('div');
+    d.className = `dot dot-${c} lit dot-input`;
+    d.textContent = c === 'G' ? '초록' : '빨간';
+    iArea.appendChild(d);
+  });
+
+  for (let i = inputs.length; i < pattern.length; i++) {
+    const d = document.createElement('div');
+    d.className = 'dot dot-placeholder';
+    d.textContent = (i + 1).toString();
+    iArea.appendChild(d);
+  }
+}
+
+// LED 순서 애니메이션 (패턴 표시 중 dot 강조)
+function animateLedStep(index, on) {
+  const dot = document.getElementById(`pdot-${index}`);
+  if (!dot) return;
+  if (on) {
+    dot.classList.add('active');
+  } else {
+    dot.classList.remove('active');
+  }
+}
+
+// ── Game 2 문제 표시 ──────────────────────────────────────────
+function showQuestion(data) {
+  document.getElementById('question-text').textContent =
+    `Q${data.question_num}. ${data.question}`;
+  const grid = document.getElementById('opts-grid');
+  grid.innerHTML = '';
+  (data.options || []).forEach((opt, i) => {
+    const el = document.createElement('div');
+    el.className = 'opt';
+    el.id = `opt-${i}`;
+    el.innerHTML = `<span class="opt-num">${i+1}</span>${opt}`;
+    grid.appendChild(el);
+  });
+}
+
+function highlightOpt(idx, cls) {
+  const el = document.getElementById(`opt-${idx}`);
+  if (el) el.classList.add(cls);
+}
+
+// ── 유틸리티 ─────────────────────────────────────────────────
+function flashCard(id, cls) {
+  const el = document.getElementById(id);
+  el.classList.add(cls);
+  setTimeout(() => el.classList.remove(cls), 1200);
+}
+
+function addLog(msg, type = 'info') {
+  const area = document.getElementById('log-area');
+  const entry = document.createElement('div');
+  entry.className = `log-entry ${type}`;
+  const t = new Date().toTimeString().slice(0, 8);
+  entry.innerHTML = `<span class="log-time">${t}</span>${msg}`;
+  area.insertBefore(entry, area.firstChild);
+  while (area.children.length > 60) area.removeChild(area.lastChild);
+}
+
+// ── 시작 ─────────────────────────────────────────────────────
+initEnvPanel();
+connect();
+addLog(`대시보드 로드 완료. 서버(${serverIp}:${serverPort})에 연결 시도 중...`, 'info');
+</script>
+</body>
+</html>
