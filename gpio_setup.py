@@ -116,6 +116,22 @@ def read_game1_button_timed(timeout_sec: float):
         return None
 
 
+def start_button_stream():
+    """Game3용: Pi에 연속 버튼 스트리밍 시작 명령"""
+    ss.clear_button_queue()
+    ss.send_to_pi("start_streaming", {})
+
+
+def stop_button_stream():
+    """Game3용: Pi 연속 버튼 스트리밍 중지 명령"""
+    ss.send_to_pi("stop_streaming", {})
+
+
+def get_button_nowait():
+    """논블로킹 버튼 이벤트 확인. 없으면 None 반환."""
+    return ss.get_button_nowait()
+
+
 def wait_for_any_button(pins):
     """
     Pi 버튼 중 가장 먼저 눌린 버튼 인덱스 수신 (Game2용, 9초 카운트다운 포함).

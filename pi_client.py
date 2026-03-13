@@ -28,8 +28,8 @@ RECONNECT_DELAY = 3
 # ── GPIO 핀 (BCM 기준) ───────────────────────────────────────────
 LED_GREEN   = 17
 LED_RED     = 27
-BTN_GREEN   = 22   # Game1 초록 버튼
-BTN_RED     = 23   # Game1 빨간 버튼
+BTN_GREEN   = 22   # Game1/Game3 초록 버튼 (왼쪽)
+BTN_RED     = 23   # Game1/Game3 빨간 버튼 (오른쪽)
 BTN1        = 5
 BTN2        = 6
 BTN3        = 13
@@ -39,6 +39,12 @@ BUZZER      = 26
 ANSWER_PINS = [BTN1, BTN2, BTN3, BTN4]
 ALL_OUTPUT_PINS = (LED_GREEN, LED_RED, BUZZER)
 ALL_INPUT_PINS  = (BTN_GREEN, BTN_RED, BTN1, BTN2, BTN3, BTN4)
+
+# ── 스트리밍 모드 상태 ────────────────────────────────────────────
+_streaming = False
+_stream_ws = None
+_stream_loop = None
+_stream_thread = None
 
 
 # ── GPIO 초기화 ──────────────────────────────────────────────────
@@ -95,22 +101,8 @@ def _wait_game1_button():
         time.sleep(0.01)
 
 
-def _wait_for_any_button(pins):
-    """여러 버튼 중 가장 먼저 눌린 버튼 인덱스 반환 (Game2용, 0-based)."""
-    while True:
-        for idx, pin in enumerate(pins):
-            if GPIO.input(pin) == GPIO.LOW:
-                time.sleep(0.05)
-                if GPIO.input(pin) == GPIO.LOW:
-                    while GPIO.input(pin) == GPIO.LOW:
-                        time.sleep(0.01)
-                    time.sleep(0.05)
-                    return idx
-        time.sleep(0.01)
-
-
 def _wait_game1_timed(timeout_sec):
-    """Game3용: 지정 시간 내 버튼 대기. 반환: 'G'/'R', 타임아웃 시 None"""
+    """Game1/Game3용: 지정 시간 내 버튼 대기. 반환: 'G'/'R', 타임아웃 시 None"""
     result = [None]
     done = threading.Event()
 
@@ -133,6 +125,60 @@ def _wait_game1_timed(timeout_sec):
     done.wait(timeout=timeout_sec)
     done.set()
     return result[0]
+
+
+def _wait_for_any_button_timed(pins, timeout_sec):
+    """Game2용: 지정 시간 내 버튼 대기. 반환: 0-based 인덱스, 타임아웃 시 -1"""
+    result = [-1]
+    done = threading.Event()
+
+    def btn():
+        while not done.is_set():
+            for idx, pin in enumerate(pins):
+                if GPIO.input(pin) == GPIO.LOW:
+                    time.sleep(0.05)
+                    if GPIO.input(pin) == GPIO.LOW:
+                        while GPIO.input(pin) == GPIO.LOW:
+                            time.sleep(0.01)
+                        time.sleep(0.05)
+                        result[0] = idx
+                        done.set()
+                        return
+            time.sleep(0.01)
+
+    t = threading.Thread(target=btn, daemon=True)
+    t.start()
+    done.wait(timeout=timeout_sec)
+    done.set()
+    return result[0]
+
+
+# ── 스트리밍 버튼 (Game3 바운스볼용) ─────────────────────────────
+def _stream_buttons_worker():
+    """초록/빨간 버튼을 연속 감지하여 서버로 전송 (누르는 동안 반복)"""
+    global _streaming, _stream_ws, _stream_loop
+    btn_down = {BTN_GREEN: False, BTN_RED: False}
+    last_sent = {BTN_GREEN: 0.0, BTN_RED: 0.0}
+    REPEAT_INTERVAL = 0.10  # 홀드 시 0.1초마다 반복
+
+    while _streaming:
+        now = time.time()
+        for pin, color in ((BTN_GREEN, 'G'), (BTN_RED, 'R')):
+            down = GPIO.input(pin) == GPIO.LOW
+            if down and (not btn_down[pin] or (now - last_sent[pin]) >= REPEAT_INTERVAL):
+                btn_down[pin] = True
+                last_sent[pin] = now
+                ws = _stream_ws
+                loop = _stream_loop
+                if ws and loop:
+                    msg = json.dumps({"type": "button_press", "data": {"color": color}})
+                    try:
+                        asyncio.run_coroutine_threadsafe(ws.send(msg), loop)
+                    except Exception:
+                        pass
+            elif not down:
+                btn_down[pin] = False
+        time.sleep(0.02)
 
 
 # ── 부저 ─────────────────────────────────────────────────────────
@@ -175,11 +221,15 @@ _IGNORE_TYPES = frozenset({
     "state_sync", "game_start", "game_over", "score_update",
     "stage_update", "pattern_show", "question", "correct", "wrong",
     "hint", "difficulty_up", "game_ready", "pong", "pi_status", "error",
+    "bounce_state", "dodge_state", "player_moved",
+    "display_number", "display_clear", "player_input",
 })
 
 
 async def handle_command(ws, cmd, data, loop):
     """서버로부터 수신한 명령을 executor에서 실행"""
+    global _streaming, _stream_ws, _stream_loop, _stream_thread
+
     if cmd in _IGNORE_TYPES:
         return
 
@@ -215,6 +265,22 @@ async def handle_command(ws, cmd, data, loop):
             text = data.get("text", "")
             await loop.run_in_executor(None, _speak_tts, text)
 
+        elif cmd == "start_streaming":
+            if not _streaming:
+                _streaming = True
+                _stream_ws = ws
+                _stream_loop = loop
+                _stream_thread = threading.Thread(
+                    target=_stream_buttons_worker, daemon=True
+                )
+                _stream_thread.start()
+                print("[Pi] 버튼 스트리밍 시작")
+
+        elif cmd == "stop_streaming":
+            _streaming = False
+            _stream_ws = None
+            print("[Pi] 버튼 스트리밍 중지")
+
         elif cmd == "await_button":
             btn_type = data.get("type")
             timeout  = data.get("timeout")
@@ -232,9 +298,16 @@ async def handle_command(ws, cmd, data, loop):
                     print(f"[Pi] 버튼 입력 ({'초록' if color == 'G' else '빨간'})")
 
             elif btn_type == "any":
-                idx = await loop.run_in_executor(None, _wait_for_any_button, ANSWER_PINS)
-                await ws.send(json.dumps({"type": "button_press", "data": {"button_index": idx}}))
-                print(f"[Pi] 버튼 입력 (index={idx}, 버튼 {idx + 1}번)")
+                t = timeout or 9
+                idx = await loop.run_in_executor(
+                    None, _wait_for_any_button_timed, ANSWER_PINS, t
+                )
+                if idx == -1:
+                    await ws.send(json.dumps({"type": "button_press", "data": {"timeout": True}}))
+                    print("[Pi] 시간 초과 (any)")
+                else:
+                    await ws.send(json.dumps({"type": "button_press", "data": {"button_index": idx}}))
+                    print(f"[Pi] 버튼 입력 (index={idx}, 버튼 {idx + 1}번)")
 
         else:
             print(f"[Pi] 알 수 없는 명령: {cmd}")
@@ -251,7 +324,7 @@ async def run_client():
     while True:
         try:
             print(f"[Pi] 서버 연결 시도: {ws_url}")
-            async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as ws:
+            async with websockets.connect(ws_url, ping_interval=None) as ws:
                 await ws.send(json.dumps({"type": "pi_register", "data": {}}))
                 print("[Pi] 서버에 등록됨. GPIO 명령 대기 중...")
 
@@ -269,6 +342,10 @@ async def run_client():
             print(f"[Pi] 연결 오류: {e}")
         except Exception as e:
             print(f"[Pi] 예외: {e}")
+
+        # 연결 해제 시 스트리밍 중지
+        global _streaming
+        _streaming = False
 
         print(f"[Pi] {RECONNECT_DELAY}초 후 재연결...")
         await asyncio.sleep(RECONNECT_DELAY)

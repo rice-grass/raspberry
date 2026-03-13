@@ -58,9 +58,9 @@ def run_game2():
 
     ss.broadcast("game_start", {"game": "AI 퀴즈 게임"})
 
-    # 7세그먼트 초기화
-    tm = g.TM1637Display()
-    tm.show_number(0)
+    # LED 초기화 (이전 게임에서 켜진 상태 초기화)
+    g.led_off(g.LED_RED)
+    g.led_off(g.LED_GREEN)
 
     score = 0
     streak = 0
@@ -91,9 +91,6 @@ def run_game2():
                 "difficulty": difficulty,
             })
 
-            # 7세그먼트에 현재 점수 표시
-            tm.show_number(score)
-
             # 버튼 입력 대기
             idx = g.wait_for_any_button(ANSWER_PINS)
 
@@ -109,7 +106,6 @@ def run_game2():
                     "max_score": TOTAL_QUESTIONS * POINTS_PER_CORRECT,
                     "reason": "timeout",
                 })
-                tm.show_number(score)
                 return score
 
             answer_given = idx + 1  # 1-based
@@ -126,7 +122,6 @@ def run_game2():
 
                 g.led_blink(g.LED_GREEN, times=2, on_sec=0.2, off_sec=0.1)
                 g.buzzer_correct()
-                tm.show_number(score)
 
                 ss.broadcast("correct", {
                     "answer": q["answer"],
@@ -175,16 +170,11 @@ def run_game2():
     print(f"   최종 점수: {score} / {TOTAL_QUESTIONS * POINTS_PER_CORRECT}점")
     print("="*50)
 
-    tm.show_number(score)
     ss.broadcast("game_over", {
         "score": score,
         "total_questions": TOTAL_QUESTIONS,
         "max_score": TOTAL_QUESTIONS * POINTS_PER_CORRECT,
     })
-
-    # 정답 수 표시 (5초간)
-    time.sleep(5)
-    tm.clear()
 
     return score
 

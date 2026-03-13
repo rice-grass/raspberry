@@ -243,22 +243,23 @@
     .dot-placeholder { background:#1a1d2e; border-color:#333; color:#444; }
     .dot-input { border-width: 3px; }
 
-    /* Game 3: Dodge */
-    #dodge-card { margin-bottom: 12px; display: none; }
-    .lane {
-      flex: 1; height: 76px; border-radius: 10px;
-      border: 2px solid #2a2d3e; background: #13151f;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1.5rem; transition: all 0.25s;
+    /* Game 3: Bounce Ball */
+    #bounce-card { margin-bottom: 12px; display: none; }
+    #bounce-grid {
+      display: grid;
+      gap: 2px;
+      background: #080a0e;
+      border-radius: 8px;
+      padding: 6px;
+      width: 100%;
     }
-    .lane.player { background: #0d2018; border-color: #4caf50; box-shadow: 0 0 14px #4caf5044; }
-    .lane.danger { background: #1a0808; border-color: #f44336; animation: dangerPulse 0.6s ease infinite alternate; }
-    .lane.player.danger { background: #2d0808; border-color: #f44336; box-shadow: 0 0 22px #f44336; }
-    @keyframes dangerPulse {
-      from { box-shadow: 0 0 6px #f4433644; }
-      to   { box-shadow: 0 0 20px #f44336aa; }
-    }
-    #dodge-timer { font-size: 1.2rem; font-weight: 700; transition: color 0.3s; }
+    .bc { aspect-ratio: 1; border-radius: 2px; }
+    .bc-empty  { background: #0f1117; }
+    .bc-brick0 { background: #f44336; box-shadow: inset 0 1px 0 #f4433688; }
+    .bc-brick1 { background: #ff9800; box-shadow: inset 0 1px 0 #ff980088; }
+    .bc-brick2 { background: #ffeb3b; box-shadow: inset 0 1px 0 #ffeb3b88; }
+    .bc-paddle { background: #2196f3; border-radius: 4px; }
+    .bc-ball   { background: #fff; border-radius: 50%; box-shadow: 0 0 6px #fff; }
 
     /* Game 2: Question */
     #question-card { margin-bottom: 12px; display: none; }
@@ -375,9 +376,9 @@
     </button>
     <button class="game-btn" id="btn-game3" onclick="startGame('3')" disabled>
       <span class="btn-badge">진행 중</span>
-      <span class="btn-icon">↔️</span>
-      <div class="btn-title">좌우 피하기</div>
-      <div class="btn-desc">위험 레인을 피하세요<br>초록=왼쪽 / 빨간=오른쪽</div>
+      <span class="btn-icon">🎾</span>
+      <div class="btn-title">바운스볼</div>
+      <div class="btn-desc">공을 튕겨 벽돌을 깨세요<br>초록=왼쪽 / 빨간=오른쪽</div>
     </button>
   </div>
 </div>
@@ -426,14 +427,17 @@
   <div id="input-area"></div>
 </div>
 
-<!-- Game 3: Dodge -->
-<div class="card" id="dodge-card">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-    <div class="card-label" style="margin-bottom:0;">레인</div>
-    <span id="dodge-timer">—</span>
+<!-- Game 3: Bounce Ball -->
+<div class="card" id="bounce-card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <div class="card-label" style="margin-bottom:0;">바운스볼</div>
+    <div style="display:flex;gap:12px;align-items:center;font-size:0.82rem;">
+      <span id="bounce-lives" style="color:#f44336;">❤️❤️❤️</span>
+      <span id="bounce-stage" style="color:#888;">Stage 1</span>
+    </div>
   </div>
-  <div id="dodge-lanes" style="display:flex;gap:6px;"></div>
-  <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:0.75rem;color:#555;">
+  <div id="bounce-grid"></div>
+  <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:0.75rem;color:#555;">
     <span>← 초록 버튼</span>
     <span>빨간 버튼 →</span>
   </div>
@@ -470,9 +474,9 @@ let currentPattern = [];
 let playerInputs = [];
 let piConnected = false;
 let currentGame = null;      // '1' | '2' | '3'
-let dodgeDanger = 1;
-let dodgeLanes = 7;
-let dodgeTimerInterval = null;
+let bounceGridCols = 0;
+let bounceGridRows = 0;
+let bounceGridCells = null;
 
 // ── 환경 패널 초기화 ──────────────────────────────────────────
 function initEnvPanel() {
@@ -552,7 +556,7 @@ function startGame(id) {
   if (gameRunning) return;
 
   ws.send(JSON.stringify({ type: 'start_game', data: { game: id } }));
-  const names = {'1':'🎨 컬러 메모리 게임', '2':'🧠 AI 퀴즈', '3':'↔️ 좌우 피하기'};
+  const names = {'1':'🎨 컬러 메모리 게임', '2':'🧠 AI 퀴즈', '3':'🎾 바운스볼'};
   addLog((names[id] || '게임') + ' 시작 요청 전송', 'info');
 }
 
@@ -582,14 +586,14 @@ function handle(msg) {
         gameRunning = true;
         enableButtons(false);
         const isQuiz  = data.game && data.game.includes('퀴즈');
-        const isDodge = data.game && data.game.includes('피하기');
+        const isDodge = data.game && data.game.includes('바운스볼');
         currentGame = isQuiz ? '2' : isDodge ? '3' : '1';
         setActiveGame(currentGame);
         document.getElementById('game-name').textContent = data.game || '진행 중';
         document.getElementById('pattern-card').style.display  = currentGame === '1' ? 'block' : 'none';
         document.getElementById('question-card').style.display = currentGame === '2' ? 'block' : 'none';
-        document.getElementById('dodge-card').style.display    = currentGame === '3' ? 'block' : 'none';
-        setPhase(isDodge ? '↔️ 게임 진행 중...' : isQuiz ? '🧠 게임 진행 중...' : '🎨 게임 진행 중...', '');
+        document.getElementById('bounce-card').style.display    = currentGame === '3' ? 'block' : 'none';
+        setPhase(isDodge ? '🎾 게임 진행 중...' : isQuiz ? '🧠 게임 진행 중...' : '🎨 게임 진행 중...', '');
       } else {
         gameRunning = false;
         enableButtons(ws && ws.readyState === WebSocket.OPEN);
@@ -607,10 +611,10 @@ function handle(msg) {
       document.getElementById('diff-badge').textContent = '';
       document.getElementById('pattern-card').style.display = 'none';
       document.getElementById('question-card').style.display = 'none';
-      document.getElementById('dodge-card').style.display = 'none';
+      document.getElementById('bounce-card').style.display = 'none';
       document.getElementById('quiz-progress-bar').style.width = '0%';
       document.getElementById('game-status-bar').classList.remove('visible');
-      if (dodgeTimerInterval) { clearInterval(dodgeTimerInterval); dodgeTimerInterval = null; }
+      bounceGridCols = 0;
       addLog('✋ ' + (data.message || '게임을 선택하세요'), 'info');
       break;
 
@@ -619,7 +623,7 @@ function handle(msg) {
       currentPattern = [];
       playerInputs = [];
       const isQuiz  = data.game && data.game.includes('퀴즈');
-      const isDodge = data.game && data.game.includes('피하기');
+      const isDodge = data.game && data.game.includes('바운스볼');
       currentGame = isQuiz ? '2' : isDodge ? '3' : '1';
       setActiveGame(currentGame);
       document.getElementById('game-name').textContent = data.game;
@@ -628,9 +632,9 @@ function handle(msg) {
       document.getElementById('gameover-banner').style.display = 'none';
       document.getElementById('pattern-card').style.display  = currentGame === '1' ? 'block' : 'none';
       document.getElementById('question-card').style.display = currentGame === '2' ? 'block' : 'none';
-      document.getElementById('dodge-card').style.display    = currentGame === '3' ? 'block' : 'none';
+      document.getElementById('bounce-card').style.display    = currentGame === '3' ? 'block' : 'none';
       document.getElementById('diff-value').textContent = isQuiz ? '쉬움' : '—';
-      setPhase(isDodge ? '↔️ 좌우 피하기 시작!' : isQuiz ? '🧠 AI 퀴즈 게임 시작!' : '🎨 컬러 메모리 게임 시작!', '');
+      setPhase(isDodge ? '🎾 바운스볼 시작!' : isQuiz ? '🧠 AI 퀴즈 게임 시작!' : '🎨 컬러 메모리 게임 시작!', '');
       addLog('🎮 게임 시작: ' + data.game, 'info');
       break;
     }
@@ -686,22 +690,12 @@ function handle(msg) {
       setPhase(data.label, '');
       break;
 
-    case 'dodge_state':
-      dodgeDanger = data.danger;
-      dodgeLanes  = data.lanes || 7;
-      renderDodge(data.player, data.danger, data.lanes || 7);
-      startDodgeTimer(data.time_limit || 3.0);
-      setPhase('⚡ 위험 레인을 피하세요!', `제한: ${data.time_limit}초`);
-      addLog(`⚡ 위험 레인: ${data.danger}  |  현재 위치: ${data.player}`, 'warn');
+    case 'bounce_state':
+      renderBounce(data);
       break;
 
     case 'player_input':
-      if (data.player !== undefined && currentGame === '3') {
-        if (dodgeTimerInterval) { clearInterval(dodgeTimerInterval); dodgeTimerInterval = null; }
-        renderDodge(data.player, dodgeDanger, dodgeLanes);
-        const dir = data.color === 'G' ? '← 왼쪽' : data.color === 'R' ? '→ 오른쪽' : '⏸ 제자리';
-        addLog(`👆 ${dir} 이동 → 레인 ${data.player}`, 'info');
-      } else if (data.color !== undefined) {
+      if (data.color !== undefined && currentGame !== '3') {
         playerInputs.push(data.color);
         renderPattern(currentPattern, playerInputs);
         addLog('👆 입력: ' + (data.label || data.color), 'info');
@@ -735,6 +729,9 @@ function handle(msg) {
         if (data.given) highlightOpt(data.given - 1, 'wrong');
         setPhase('❌ 오답', '정답: ' + data.correct_answer + '번');
         addLog('❌ 오답! 정답: ' + data.correct_answer + '번', 'wrong');
+      } else if (data.danger !== undefined) {
+        setPhase('💥 충돌!', `레인 ${data.danger}`);
+        addLog(`💥 충돌! 레인 ${data.danger}`, 'wrong');
       } else {
         const exp = (data.expected_labels || data.expected || []).join('→');
         const got = (data.got_labels || data.got || []).join('→');
@@ -751,7 +748,7 @@ function handle(msg) {
 
     case 'game_over':
       gameRunning = false;
-      if (dodgeTimerInterval) { clearInterval(dodgeTimerInterval); dodgeTimerInterval = null; }
+      bounceGridCols = 0;
       enableButtons(ws && ws.readyState === WebSocket.OPEN);
       setActiveGame(null);
       document.getElementById('quiz-progress-bar').style.width = '100%';
@@ -803,45 +800,54 @@ function showScoreInc(text) {
   setTimeout(() => { el.style.display = 'none'; }, 900);
 }
 
-// ── Game 3 Dodge 렌더링 ───────────────────────────────────────
-function renderDodge(player, danger, lanes) {
-  const container = document.getElementById('dodge-lanes');
-  container.innerHTML = '';
-  for (let i = 1; i <= lanes; i++) {
-    const lane = document.createElement('div');
-    lane.className = 'lane';
-    if (i === player && i === danger) {
-      lane.classList.add('player', 'danger');
-      lane.textContent = '💥';
-    } else if (i === player) {
-      lane.classList.add('player');
-      lane.textContent = '🧑';
-    } else if (i === danger) {
-      lane.classList.add('danger');
-      lane.textContent = '⚡';
-    }
-    container.appendChild(lane);
-  }
-}
+// ── Game 3 Bounce Ball 렌더링 ─────────────────────────────────
+function renderBounce(data) {
+  const cols = data.cols, rows = data.rows;
+  const grid = document.getElementById('bounce-grid');
 
-function startDodgeTimer(seconds) {
-  if (dodgeTimerInterval) clearInterval(dodgeTimerInterval);
-  let remaining = seconds;
-  const el = document.getElementById('dodge-timer');
-  el.style.color = '#fff';
-  el.textContent = remaining.toFixed(1) + 's';
-  dodgeTimerInterval = setInterval(() => {
-    remaining -= 0.1;
-    if (remaining <= 0) {
-      clearInterval(dodgeTimerInterval);
-      dodgeTimerInterval = null;
-      el.textContent = '0.0s';
-      el.style.color = '#f44336';
-      return;
+  // 그리드 초기화 (크기 변경 시)
+  if (bounceGridCols !== cols || bounceGridRows !== rows) {
+    bounceGridCols = cols;
+    bounceGridRows = rows;
+    grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    grid.innerHTML = '';
+    for (let i = 0; i < rows * cols; i++) {
+      const c = document.createElement('div');
+      c.className = 'bc bc-empty';
+      grid.appendChild(c);
     }
-    el.textContent = remaining.toFixed(1) + 's';
-    el.style.color = remaining < 1.0 ? '#f44336' : remaining < 2.0 ? '#ff9800' : '#fff';
-  }, 100);
+    bounceGridCells = grid.children;
+  }
+
+  // 전체 초기화
+  for (let i = 0; i < bounceGridCells.length; i++) {
+    bounceGridCells[i].className = 'bc bc-empty';
+  }
+
+  // 벽돌
+  for (let r = 0; r < data.bricks.length; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (data.bricks[r][c]) {
+        bounceGridCells[r * cols + c].className = `bc bc-brick${r}`;
+      }
+    }
+  }
+
+  // 패들
+  const paddleRow = rows - 1;
+  for (let i = 0; i < data.paddle[1]; i++) {
+    const idx = paddleRow * cols + data.paddle[0] + i;
+    if (idx < bounceGridCells.length) bounceGridCells[idx].className = 'bc bc-paddle';
+  }
+
+  // 공
+  const br = Math.min(rows - 1, Math.max(0, Math.round(data.ball[1])));
+  const bc = Math.min(cols - 1, Math.max(0, Math.round(data.ball[0])));
+  bounceGridCells[br * cols + bc].className = 'bc bc-ball';
+
+  // 목숨 / 스테이지 표시
+  document.getElementById('bounce-lives').textContent = '❤️'.repeat(Math.max(0, data.lives));
+  document.getElementById('bounce-stage').textContent = `Stage ${data.stage}`;
 }
 
 // ── Game 1 패턴 렌더링 ────────────────────────────────────────
