@@ -580,7 +580,7 @@ function handle(msg) {
       document.getElementById('pattern-card').style.display = isQuiz ? 'none' : 'block';
       document.getElementById('question-card').style.display = isQuiz ? 'block' : 'none';
       document.getElementById('diff-value').textContent = isQuiz ? '쉬움' : '—';
-      setPhase(isQuiz ? '🧠 AI 퀴즈 게임 시작!' : '🎨 컬러 메모리 게임 시작!', '');
+      setPhase(isQuiz ? 'AI 퀴즈 게임 시작!' : '컬러 메모리 게임 시작!', '');
       addLog('🎮 게임 시작: ' + data.game, 'info');
       break;
     }

@@ -28,19 +28,23 @@ def _generate_pattern(length: int) -> list:
     return [random.choice(COLORS) for _ in range(length)]
 
 
-def _collect_player_input(length: int) -> list:
+def _collect_player_input(length: int):
     """
     플레이어에게 length번의 버튼 입력을 받아 색상 리스트로 반환.
-    짧게(<0.4s) → 'G', 길게(≥0.4s) → 'R'
+    타임아웃 발생 시 None 반환.
     """
     player_input = []
     for i in range(length):
         print(f"  입력 {i+1}/{length}: 초록 또는 빨간 버튼을 누르세요...", end=" ", flush=True)
         color = g.read_game1_button()
+        if color is None:
+            print("⏰ 시간 초과!")
+            ss.broadcast("game_phase", {"phase": "timeout", "label": "⏰ 시간 초과!"})
+            return None
+
         label = COLOR_LABEL[color]
         print(f"→ {label}")
 
-        # 입력 즉시 시각 피드백
         pin = g.LED_GREEN if color == 'G' else g.LED_RED
         g.led_blink(pin, times=1, on_sec=0.2, off_sec=0.0)
 
@@ -87,6 +91,15 @@ def run_game1():
             print("\n입력하세요:")
             player_input = _collect_player_input(stage)
 
+            # 타임아웃 → 게임 오버
+            if player_input is None:
+                print(f"\n⏰ 시간 초과! 게임 오버! 최종 점수: {score}점")
+                g.led_blink(g.LED_RED, WRONG_FLASH_TIMES, 0.1, 0.1)
+                g.speak_tts('시간 초과입니다')
+                ss.broadcast("wrong", {"timeout": True, "expected": pattern, "expected_labels": pattern_labels})
+                ss.broadcast("game_over", {"score": score, "stages_completed": stage - 1, "reason": "timeout"})
+                break
+
             # 정답 판정
             if player_input == pattern:
                 # 정답
@@ -108,7 +121,7 @@ def run_game1():
                 print(f"\n🏁 게임 오버! 최종 점수: {score}점 (스테이지 {stage}까지 클리어)")
 
                 g.led_blink(g.LED_RED, WRONG_FLASH_TIMES, 0.1, 0.1)
-                g.buzzer_wrong()
+                g.speak_tts('틀렸습니다')
 
                 ss.broadcast("wrong", {
                     "expected": pattern,

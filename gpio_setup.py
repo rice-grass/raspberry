@@ -79,35 +79,43 @@ def led_flash_sequence(sequence):
 
 
 # ── 버튼 유틸리티 ────────────────────────────────────────────────
+COUNTDOWN_SEC = 9   # 버튼 입력 제한 시간
+
+
 def read_game1_button():
     """
-    Game1 두 버튼 입력 수신.
-    Pi에 await_button 명령 전송 → Pi가 BTN_GREEN/BTN_RED 중 눌린 버튼 반환.
-    반환: 'G' (초록 버튼) 또는 'R' (빨간 버튼)
+    Game1 두 버튼 입력 수신 (9초 카운트다운 포함).
+    반환: 'G' 또는 'R', 타임아웃 시 None
     """
     ss.clear_button_queue()
-    ss.send_to_pi("await_button", {"type": "game1"})
+    ss.send_to_pi("await_button", {"type": "game1", "timeout": COUNTDOWN_SEC})
     try:
-        event = ss.get_button_event(timeout=120)
+        event = ss.get_button_event(timeout=COUNTDOWN_SEC + 3)
+        if event.get("timeout"):
+            print("[GPIO] 시간 초과")
+            return None
         return event.get("color", "G")
     except queue.Empty:
-        print("[GPIO] 버튼 타임아웃 → 초록으로 처리")
-        return "G"
+        print("[GPIO] 버튼 큐 타임아웃")
+        return None
 
 
 def wait_for_any_button(pins):
     """
-    Pi 버튼 중 가장 먼저 눌린 버튼 인덱스 수신 (Game2용).
-    반환: 0-based 인덱스
+    Pi 버튼 중 가장 먼저 눌린 버튼 인덱스 수신 (Game2용, 9초 카운트다운 포함).
+    반환: 0-based 인덱스, 타임아웃 시 -1
     """
     ss.clear_button_queue()
-    ss.send_to_pi("await_button", {"type": "any", "pins": list(pins)})
+    ss.send_to_pi("await_button", {"type": "any", "pins": list(pins), "timeout": COUNTDOWN_SEC})
     try:
-        event = ss.get_button_event(timeout=120)
+        event = ss.get_button_event(timeout=COUNTDOWN_SEC + 3)
+        if event.get("timeout"):
+            print("[GPIO] 시간 초과")
+            return -1
         return event.get("button_index", 0)
     except queue.Empty:
-        print("[GPIO] 버튼 타임아웃 → 1번 버튼으로 처리")
-        return 0
+        print("[GPIO] 버튼 큐 타임아웃")
+        return -1
 
 
 # ── 부저 유틸리티 ────────────────────────────────────────────────
@@ -126,6 +134,12 @@ def buzzer_wrong():
     """오답 효과음: 300Hz"""
     ss.send_to_pi("buzzer_wrong", {})
     time.sleep(0.5)
+
+
+# ── TTS 유틸리티 ─────────────────────────────────────────────────
+def speak_tts(text):
+    """Pi 스피커로 TTS 재생"""
+    ss.send_to_pi("speak", {"text": text})
 
 
 # ── TM1637 7세그먼트 드라이버 (소켓 기반 프록시) ────────────────

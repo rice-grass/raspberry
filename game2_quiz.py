@@ -96,6 +96,22 @@ def run_game2():
 
             # 버튼 입력 대기
             idx = g.wait_for_any_button(ANSWER_PINS)
+
+            # 타임아웃 → 게임 오버
+            if idx == -1:
+                print(f"\n⏰ 시간 초과! 게임 오버! 최종 점수: {score}점")
+                g.led_blink(g.LED_RED, times=3, on_sec=0.1, off_sec=0.1)
+                g.speak_tts('시간 초과입니다')
+                ss.broadcast("wrong", {"timeout": True})
+                ss.broadcast("game_over", {
+                    "score": score,
+                    "total_questions": TOTAL_QUESTIONS,
+                    "max_score": TOTAL_QUESTIONS * POINTS_PER_CORRECT,
+                    "reason": "timeout",
+                })
+                tm.show_number(score)
+                return score
+
             answer_given = idx + 1  # 1-based
             print(f"\n선택: {answer_given}번 → {q['options'][idx]}")
             ss.broadcast("player_input", {"answer": answer_given})
@@ -140,7 +156,7 @@ def run_game2():
                 print(f"❌ 오답! 정답은 {q['answer']}번: {correct_opt}")
 
                 g.led_blink(g.LED_RED, times=2, on_sec=0.2, off_sec=0.1)
-                g.buzzer_wrong()
+                g.speak_tts('틀렸습니다')
 
                 ss.broadcast("wrong", {
                     "given": answer_given,
